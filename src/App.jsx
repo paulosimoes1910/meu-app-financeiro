@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+// TESTE DE MUDANÇA PARA O GIT
+// import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, onSnapshot, addDoc, query, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 // IMPORTAÇÕES NOVAS para o Login com Google
