@@ -91,7 +91,67 @@ const VisaoGeralContent = ({ transacoes, cartoes, prestacoes, formatCurrency, is
         if (!isPdfLibReady || !window.jspdf) { console.error("PDF libraries not ready."); return; }
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
-        // ... (código completo de gerar PDF)
+        const monthYear = currentDate.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+        let finalY = 20;
+
+        doc.setFontSize(18);
+        doc.text(`Relatório Mensal - ${monthYear.toUpperCase()}`, 14, finalY);
+        finalY += 15;
+        
+        const addTable = (title, head, body, totalLabel, totalValue) => {
+            if (body.length > 0) {
+                doc.setFontSize(12);
+                doc.text(title, 14, finalY);
+                finalY += 8;
+                
+                doc.autoTable({
+                    head: [head],
+                    body: body,
+                    startY: finalY,
+                    theme: 'grid',
+                    headStyles: { fillColor: [41, 128, 185] },
+                    didDrawPage: (data) => {
+                        doc.setFontSize(10);
+                        doc.setFont(undefined, 'bold');
+                        const totalText = `${totalLabel}: ${formatCurrency(totalValue)}`;
+                        const textWidth = doc.getTextWidth(totalText);
+                        const pageWidth = doc.internal.pageSize.width;
+                        const x = pageWidth - data.settings.margin.right - textWidth;
+                        let y = data.cursor.y + 10;
+                        if (data.pageNumber > 1) { y = doc.internal.pageSize.height - 10; }
+                        doc.text(totalText, x, y);
+                    }
+                });
+                finalY = doc.lastAutoTable.finalY + 15;
+            }
+        };
+
+        const receitasDoMes = monthlySummary.filteredTransacoes.filter(t => t.tipo === 'receita');
+        addTable("Receitas", ["Descrição", "Data", "Valor"], receitasDoMes.map(item => [item.descricao, item.data?.toDate().toLocaleDateString('pt-BR') || 'N/A', formatCurrency(item.valor)]), "Total Receitas", monthlySummary.totalReceitas);
+
+        const despesasDoMes = monthlySummary.filteredTransacoes.filter(t => t.tipo === 'despesa');
+        addTable("Despesas Gerais", ["Descrição", "Data", "Valor"], despesasDoMes.map(item => [item.descricao, item.data?.toDate().toLocaleDateString('pt-BR') || 'N/A', formatCurrency(item.valor)]), "Total Despesas", monthlySummary.despesasGerais);
+
+        addTable("Faturas de Cartão", ["Nome", "Vencimento", "Valor"], monthlySummary.filteredCartoes.map(item => [item.nome, new Date(item.vencimentoFatura + 'T00:00:00Z').toLocaleDateString('pt-BR'), formatCurrency(item.valorFatura)]), "Total Faturas", monthlySummary.faturasCartao);
+
+        addTable("Prestações do Mês", ["Descrição", "Valor da Parcela"], monthlySummary.filteredPrestacoes.map(item => [item.descricao, formatCurrency(item.valorParcela)]), "Total Prestações", monthlySummary.prestacoesMes);
+        
+        finalY = Math.max(finalY, 20);
+        doc.setFontSize(12);
+        doc.text("Resumo Financeiro do Mês", 14, finalY);
+        doc.autoTable({
+            body: [
+                ['Total de Receitas:', { content: formatCurrency(monthlySummary.totalReceitas), styles: { halign: 'right' } }],
+                ['Total de Despesas:', { content: formatCurrency(monthlySummary.totalDespesas), styles: { halign: 'right' } }],
+                ['SALDO FINAL:', { content: formatCurrency(monthlySummary.saldoTotal), styles: { halign: 'right', fontStyle: 'bold' } }],
+            ],
+            startY: finalY + 8,
+            theme: 'striped',
+            styles: { fontStyle: 'bold' },
+            columnStyles: { 0: { fontStyle: 'bold' } }
+        });
+
+        doc.save(`relatorio_${currentDate.getMonth()+1}_${currentDate.getFullYear()}.pdf`);
     };
     const toggleVisibility = () => setIsDataVisible(!isDataVisible);
     const hiddenValue = '£ ••••,••';
@@ -116,7 +176,54 @@ const VisaoGeralContent = ({ transacoes, cartoes, prestacoes, formatCurrency, is
 };
 const TransacoesContent = ({ transacoes, formatCurrency, handleDeleteRequest, isPdfLibReady }) => {
     const [filter, setFilter] = useState('todos');
-    const generatePDF = (items, filter) => { /* ...código... */ };
+    const generatePDF = (items, filter) => {
+        if (!isPdfLibReady || !window.jspdf) { console.error("PDF libraries not ready."); return; }
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+
+        const title = `Relatório de Transações ${filter !== 'todos' ? `(${filter})` : ''}`;
+        doc.text(title, 14, 20);
+
+        const tableColumn = ["Descrição", "Data", "Tipo", "Valor"];
+        const tableRows = items.map(item => [
+            item.descricao,
+            item.data?.toDate().toLocaleDateString('pt-BR') || 'N/A',
+            item.tipo,
+            formatCurrency(item.valor)
+        ]);
+
+        doc.autoTable({
+            head: [tableColumn],
+            body: tableRows,
+            startY: 30,
+            didDrawPage: (data) => {
+                const finalY = data.cursor.y + 10;
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'bold');
+                
+                const drawTotal = (label, value, yPos) => {
+                    const text = `${label}: ${formatCurrency(value)}`;
+                    const textWidth = doc.getTextWidth(text);
+                    const pageWidth = doc.internal.pageSize.width;
+                    const x = pageWidth - data.settings.margin.right - textWidth;
+                    doc.text(text, x, yPos);
+                }
+                
+                const totalReceitas = items.filter(t => t.tipo === 'receita').reduce((acc, t) => acc + t.valor, 0);
+                const totalDespesas = items.filter(t => t.tipo === 'despesa').reduce((acc, t) => acc + t.valor, 0);
+                const saldo = totalReceitas - totalDespesas;
+                
+                let currentY = finalY;
+                drawTotal('Total de Receitas', totalReceitas, currentY);
+                currentY += 6;
+                drawTotal('Total de Despesas', totalDespesas, currentY);
+                currentY += 6;
+                drawTotal('Saldo', saldo, currentY);
+            }
+        });
+
+        doc.save(`relatorio_transacoes_${filter}.pdf`);
+    };
     const filterOptions = useMemo(() => { const descriptions = transacoes.map(item => item.descricao); return ['todos', ...new Set(descriptions)]; }, [transacoes]);
     const filteredTransacoes = useMemo(() => { if (filter === 'todos') return transacoes; return transacoes.filter(item => item.descricao === filter); }, [filter, transacoes]);
     const totalReceitas = filteredTransacoes.filter(t => t.tipo === 'receita').reduce((acc, t) => acc + t.valor, 0);
@@ -157,7 +264,40 @@ const TransacoesContent = ({ transacoes, formatCurrency, handleDeleteRequest, is
 };
 const CartoesContent = ({ cartoes, formatCurrency, handleDeleteRequest, isPdfLibReady }) => {
     const [filter, setFilter] = useState('todos');
-    const generatePDF = (items, filter) => { /* ...código... */ };
+    const generatePDF = (items, filter) => {
+        if (!isPdfLibReady || !window.jspdf) { console.error("PDF libraries not ready."); return; }
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+
+        const title = `Relatório de Cartões ${filter !== 'todos' ? `(${filter})` : ''}`;
+        doc.text(title, 14, 20);
+
+        const tableColumn = ["Nome do Cartão", "Vencimento", "Valor da Fatura"];
+        const tableRows = items.map(item => [
+            item.nome,
+            new Date(Date.parse(item.vencimentoFatura + 'T00:00:00Z')).toLocaleDateString('pt-BR', { timeZone: 'UTC' }),
+            formatCurrency(item.valorFatura)
+        ]);
+        
+        doc.autoTable({
+            head: [tableColumn],
+            body: tableRows,
+            startY: 30,
+            didDrawPage: (data) => {
+                const finalY = data.cursor.y + 10;
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'bold');
+                const totalFaturas = items.reduce((acc, t) => acc + t.valorFatura, 0);
+                const totalText = `Total em Faturas: ${formatCurrency(totalFaturas)}`;
+                const textWidth = doc.getTextWidth(totalText);
+                const pageWidth = doc.internal.pageSize.width;
+                const x = pageWidth - data.settings.margin.right - textWidth;
+                doc.text(totalText, x, finalY);
+            }
+        });
+
+        doc.save(`relatorio_cartoes_${filter}.pdf`);
+    };
     const filterOptions = useMemo(() => { const descriptions = cartoes.map(item => item.nome); return ['todos', ...new Set(descriptions)]; }, [cartoes]);
     const filteredCartoes = useMemo(() => { if (filter === 'todos') return cartoes; return cartoes.filter(item => item.nome === filter); }, [filter, cartoes]);
     const totalFaturas = filteredCartoes.reduce((acc, card) => acc + card.valorFatura, 0);
@@ -182,7 +322,50 @@ const CartoesContent = ({ cartoes, formatCurrency, handleDeleteRequest, isPdfLib
 };
 const PrestacoesContent = ({ prestacoes, formatCurrency, handleDeleteRequest, isPdfLibReady }) => {
     const [filter, setFilter] = useState('todos');
-    const generatePDF = (items, filter) => { /* ...código... */ };
+    const generatePDF = (items, filter) => {
+        if (!isPdfLibReady || !window.jspdf) { console.error("PDF libraries not ready."); return; }
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+
+        const title = `Relatório de Prestações ${filter !== 'todos' ? `(${filter})` : ''}`;
+        doc.text(title, 14, 20);
+
+        const tableColumn = ["Descrição", "Nº de Parcelas", "Valor da Parcela", "Valor Total"];
+        const tableRows = items.map(item => [
+            item.descricao,
+            item.numParcelas,
+            formatCurrency(item.valorParcela),
+            formatCurrency(item.valorTotal)
+        ]);
+        
+        doc.autoTable({
+            head: [tableColumn],
+            body: tableRows,
+            startY: 30,
+            didDrawPage: (data) => {
+                let finalY = data.cursor.y + 10;
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'bold');
+                
+                const drawTotal = (label, value, yPos) => {
+                    const text = `${label}: ${formatCurrency(value)}`;
+                    const textWidth = doc.getTextWidth(text);
+                    const pageWidth = doc.internal.pageSize.width;
+                    const x = pageWidth - data.settings.margin.right - textWidth;
+                    doc.text(text, x, yPos);
+                }
+                
+                const totalParcelasMes = items.filter(p => { const currentDate = new Date(); const currentYear = currentDate.getFullYear(); const currentMonth = currentDate.getMonth(); const startDate = p.data?.toDate() || new Date(); const monthsPassed = (currentYear - startDate.getFullYear()) * 12 + (currentMonth - startDate.getMonth()); return monthsPassed >= 0 && monthsPassed < p.numParcelas; }).reduce((acc, p) => acc + p.valorParcela, 0);
+                const dividaTotal = items.reduce((acc, item) => acc + item.valorTotal, 0);
+                
+                drawTotal('Total Parcelas do Mês', totalParcelasMes, finalY);
+                finalY += 6;
+                drawTotal('Dívida Total', dividaTotal, finalY);
+            }
+        });
+
+        doc.save(`relatorio_prestacoes_${filter}.pdf`);
+    };
     const filterOptions = useMemo(() => { const descriptions = prestacoes.map(item => item.descricao); return ['todos', ...new Set(descriptions)]; }, [prestacoes]);
     const filteredPrestacoes = useMemo(() => { if (filter === 'todos') return prestacoes; return prestacoes.filter(item => item.descricao === filter); }, [filter, prestacoes]);
     const totalDivida = filteredPrestacoes.reduce((acc, item) => acc + item.valorTotal, 0);
@@ -208,7 +391,50 @@ const PrestacoesContent = ({ prestacoes, formatCurrency, handleDeleteRequest, is
 };
 const GastosFixosContent = ({ gastosFixos, formatCurrency, handleDeleteRequest, isPdfLibReady }) => {
     const [filter, setFilter] = useState('todos');
-    const generatePDF = (gastos, filter) => { /* ...código... */ };
+    const generatePDF = (gastos, filter) => {
+        if (!isPdfLibReady || !window.jspdf) { console.error("PDF libraries not ready."); return; }
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+
+        const title = `Relatório de Gastos Fixos ${filter !== 'todos' ? `(${filter})` : ''}`;
+        doc.text(title, 14, 20);
+
+        const tableColumn = ["Descrição", "Nº de Parcelas", "Valor da Parcela", "Valor Total"];
+        const tableRows = gastos.map(item => [
+            item.descricao,
+            item.numParcelas,
+            formatCurrency(item.valorParcela),
+            formatCurrency(item.valorTotal)
+        ]);
+
+        doc.autoTable({
+            head: [tableColumn],
+            body: tableRows,
+            startY: 30,
+            didDrawPage: (data) => {
+                let finalY = data.cursor.y + 10;
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'bold');
+                
+                const drawTotal = (label, value, yPos) => {
+                    const text = `${label}: ${formatCurrency(value)}`;
+                    const textWidth = doc.getTextWidth(text);
+                    const pageWidth = doc.internal.pageSize.width;
+                    const x = pageWidth - data.settings.margin.right - textWidth;
+                    doc.text(text, x, yPos);
+                }
+                
+                const totalParcelasMes = gastos.filter(p => { const currentDate = new Date(); const currentYear = currentDate.getFullYear(); const currentMonth = currentDate.getMonth(); const startDate = p.data?.toDate() || new Date(); const monthsPassed = (currentYear - startDate.getFullYear()) * 12 + (currentMonth - startDate.getMonth()); return monthsPassed >= 0 && monthsPassed < p.numParcelas; }).reduce((acc, p) => acc + p.valorParcela, 0);
+                const dividaTotal = gastos.reduce((acc, item) => acc + item.valorTotal, 0);
+                
+                drawTotal('Total Parcelas do Mês', totalParcelasMes, finalY);
+                finalY += 6;
+                drawTotal('Dívida Total', dividaTotal, finalY);
+            }
+        });
+
+        doc.save(`relatorio_gastos_fixos_${filter}.pdf`);
+    };
     const filterOptions = useMemo(() => { const descriptions = gastosFixos.map(item => item.descricao); return ['todos', ...new Set(descriptions)]; }, [gastosFixos]);
     const filteredGastos = useMemo(() => { if (filter === 'todos') return gastosFixos; return gastosFixos.filter(item => item.descricao === filter); }, [filter, gastosFixos]);
     const summary = useMemo(() => {
